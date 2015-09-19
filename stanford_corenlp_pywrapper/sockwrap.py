@@ -33,7 +33,7 @@ MODES_items = [
 
 MODES = dict(MODES_items)
 
-logging.basicConfig()  # wtf, why we have to call this?
+logging.basicConfig()
 LOG = logging.getLogger("CoreNLP_PyWrapper")
 LOG.setLevel("INFO")
 # LOG.setLevel("DEBUG")
@@ -74,7 +74,7 @@ def command(mode=None, configfile=None, configdict=None, comm_mode=None,
     else: assert False, "need comm_mode to be SOCKET or PIPE but got " + repr(comm_mode)
 
 
-    cmd = """exec {java_command} {java_options} -cp '{classpath}' 
+    cmd = """exec {java_command} {java_options} -cp '{classpath}'
     corenlp.SocketServer {comm_info} {more_config}"""
     return cmd.format(**d).replace("\n", " ")
 
@@ -85,7 +85,7 @@ class SubprocessCrashed(Exception):
 
 class CoreNLP:
 
-    def __init__(self, mode=None, 
+    def __init__(self, mode=None,
             configfile=None, configdict=None,
             corenlp_jars=(
                 "/home/sw/corenlp/stanford-corenlp-full-2015-04-20/*",
@@ -162,17 +162,24 @@ class CoreNLP:
         # might as well try
         self.cleanup()
 
+    def _check_port(self):
+        import socket;
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        result = sock.connect_ex(('127.0.0.1',self.server_port))
+        return result == 0
+
     def start_server(self):
         self.kill_proc_if_running()
 
         if self.comm_mode=='PIPE':
             if not os.path.exists(self.outpipe):
                 os.mkfifo(self.outpipe)
-        
-        cmd = command(**self.__dict__)
-        LOG.info("Starting java subprocess, and waiting for signal it's ready, with command: %s" % cmd)
-        self.proc = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE)
-        time.sleep(STARTUP_BUSY_WAIT_INTERVAL_SEC)
+
+        if self.comm_mode == 'PIPE' or not self._check_port():
+            cmd = command(**self.__dict__)
+            LOG.info("Starting java subprocess, and waiting for signal it's ready, with command: %s" % cmd)
+            self.proc = subprocess.Popen(cmd, shell=True, stdin=subprocess.PIPE)
+            time.sleep(STARTUP_BUSY_WAIT_INTERVAL_SEC)
 
         if self.comm_mode=='SOCKET':
             sock = self.get_socket(num_retries=100, retry_interval=STARTUP_BUSY_WAIT_INTERVAL_SEC)
@@ -199,6 +206,9 @@ class CoreNLP:
         LOG.info("Subprocess is ready.")
 
     def ensure_proc_is_running(self):
+        if self.comm_mode == 'SOCKET' and self._check_port():
+            return
+
         if self.proc is None:
             # Has never been started
             self.start_server()
