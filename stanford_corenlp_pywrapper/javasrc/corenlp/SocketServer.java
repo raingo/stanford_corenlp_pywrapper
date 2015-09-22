@@ -226,20 +226,25 @@ public class SocketServer {
 					// on linux but not mac this seems to happen during startup
 					// when the client isn't actually asking anything but on the server accept() seems to try to get something anyway
 					clientSocket.close();
+					clientSocket = null;
 					continue;
 				}
 				JsonNode result = parseAndRunCommand(commandstr);
 				//			log("RESULT " + result);
 				// result could be null.  let's just write it back since the client is waiting.
 				writeResultToStream(result, clientSocket.getOutputStream());
+
+				// get 'ACK', client initialized close
+				// http://stackoverflow.com/a/10726465
 				checkTimings();
 			} catch (IOException e) {
 				e.printStackTrace();
 				continue;
 			} finally {
-				if (clientSocket!= null) {
+				if (clientSocket != null) {
 					try {
 						 clientSocket.close();
+						 clientSocket = null;
 					} catch (IOException e) {
 						// log error just in case
 					}

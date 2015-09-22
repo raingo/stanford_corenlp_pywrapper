@@ -299,6 +299,8 @@ class CoreNLP:
                 LOG.warning("Incomplete value from server")
                 return None
             time.sleep(0.01)
+        if self.comm_mode == 'SOCKET':
+            sock.close()
         return ''.join(chunks)
 
 
