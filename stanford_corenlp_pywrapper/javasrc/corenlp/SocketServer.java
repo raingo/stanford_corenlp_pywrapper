@@ -19,23 +19,23 @@ import util.BasicFileIO;
 import util.JsonUtil;
 import util.U;
 
-/** 
+/**
  * == Protocol ==
- * 
+ *
  * this can go either over a socket or over stdin for the command, named pipe for ouput.  (well the output is jus a filename but presumably a named pipe makes the most sense)
- * 
+ *
  * Input is a single line with two tab-separated fields, ending with a newline:
  *     PARSEDOC \t "Hello world." \n
  * first field is the command name.  second field is the text of the document as a JSON string.
  * NO NEWLINES ALLOWED IN THE TEXT DATA!  Most JSON libraries escape newlines to \n's so you should be safe.
- * 
- * Output is 
+ *
+ * Output is
  * 1. big-endian 8-byte integer describing how many bytes the reponse will be.
  * 2. a big-ass JSON object of that length.
- * 
+ *
  * SOCKETSERVER EXAMPLE
  * in one terminal start the server with e.g.
-		java -cp "lib/*:/home/sw/corenlp/stanford-corenlp-full-2015-04-20/*" corenlp.SocketServer --server 1234 --configdict '{"annotators": "tokenize, ssplit"}' 
+		java -cp "lib/*:/home/sw/corenlp/stanford-corenlp-full-2015-04-20/*" corenlp.SocketServer --server 1234 --configdict '{"annotators": "tokenize, ssplit"}'
  * In a second terminal send it the command
 		echo -e 'PARSEDOC\t"hello world."' | nc localhost 1234 | xxd
  *  The first few xxd lines are:
@@ -66,7 +66,7 @@ public class SocketServer {
 	ServerSocket parseServer = null;
 	int port = -1;
 	String outpipeFilename;
-	
+
 	public static void main(String[] args) throws Exception {
 		SocketServer runner = new SocketServer();
 		runner.parser = new JsonPipeline();
@@ -101,7 +101,7 @@ public class SocketServer {
 		}
 		runner.parser.initializeCorenlpPipeline();
 		log("CoreNLP pipeline initialized.");
-		
+
 		if (runner.doSocketServer) {
 			runner.socketServerLoop();
 		} else if (runner.doNamedPipes) {
@@ -110,9 +110,9 @@ public class SocketServer {
 			throw new RuntimeException("no running mode selected");
 		}
 	}
-	
+
 	/****** generic functions for both socket and pipe operation ******/
-	
+
 	static void log(String message) {
 		System.err.println("INFO:CoreNLP_JavaServer: " + message);
 	}
@@ -131,10 +131,10 @@ public class SocketServer {
 			throw new RuntimeException("bad command: " + command);
 		}
 	}
-	
+
 	void checkTimings() {
 		if (parser.numDocs>0 && (
-				parser.numDocs <= 10 || 
+				parser.numDocs <= 10 ||
 				(parser.numDocs <= 1000 && (parser.numDocs % 100 == 0)) ||
 				(parser.numDocs % 1000 == 0)
 				)) {
@@ -148,7 +148,7 @@ public class SocketServer {
 						));
 			}
 	}
-	
+
 
 	JsonNode parseAndRunCommand(String commandstr) {
 		if (commandstr == null) {
@@ -169,22 +169,22 @@ public class SocketServer {
 		}
 		return result;
 	}
-	
+
 	void writeResultToStream(JsonNode result, OutputStream outstream) throws IOException {
 		// TODO: undefined behavior if >2GB return value ... which feels pretty possible.
 		// using a long for length here for future-proofing,
 		// but it doesn't help now since byte arrays have max length ~2e9 (Integer.MAX_VALUE or so)
 		byte[] resultToReturn = JsonUtil.om.writeValueAsBytes(result);
 		long resultLength = (long) resultToReturn.length;
-		
+
 		ByteBuffer bb = ByteBuffer.allocate(8);
 		bb.putLong(0, resultLength);
 		outstream.write(bb.array());
 		outstream.write(resultToReturn);
 	}
-	
+
 	/*******  socket server stuff   ***********/
-	
+
 	void initializeSocketServer() {
 		try {
 			parseServer = new ServerSocket(port);
@@ -201,44 +201,54 @@ public class SocketServer {
 		Socket clientSocket = parseServer.accept();
 //		System.err.println("Connection Accepted From: "+clientSocket.getInetAddress());
 		return clientSocket;
-		
+
 	}
-	
+
 	void socketServerLoop() throws JsonGenerationException, JsonMappingException, IOException {
 		// declare a server socket and a client socket for the server
 		// declare an input and an output stream
 		BufferedReader br;
 		Socket clientSocket = null;
 		String commandstr=null;
-		
+
 		initializeSocketServer();
 
 		while (true) {
-//			log("Waiting for Connection on Port: "+port);
+			//log("Waiting for Connection on Port: "+port);
 			commandstr = null;
 			try {
 				clientSocket = getSocketConnection();
 				br = new BufferedReader(new InputStreamReader(new DataInputStream(clientSocket.getInputStream())));
 				commandstr = br.readLine();
+
+				//			log("COMMANDSTR " + commandstr);
+				if (commandstr==null) {
+					// on linux but not mac this seems to happen during startup
+					// when the client isn't actually asking anything but on the server accept() seems to try to get something anyway
+					clientSocket.close();
+					continue;
+				}
+				JsonNode result = parseAndRunCommand(commandstr);
+				//			log("RESULT " + result);
+				// result could be null.  let's just write it back since the client is waiting.
+				writeResultToStream(result, clientSocket.getOutputStream());
+				checkTimings();
 			} catch (IOException e) {
 				e.printStackTrace();
 				continue;
+			} finally {
+				if (clientSocket!= null) {
+					try {
+						 clientSocket.close();
+					} catch (IOException e) {
+						// log error just in case
+					}
+				}
 			}
-//			log("COMMANDSTR " + commandstr);
-			if (commandstr==null) {
-				// on linux but not mac this seems to happen during startup
-				// when the client isn't actually asking anything but on the server accept() seems to try to get something anyway
-				continue;
-			}
-			JsonNode result = parseAndRunCommand(commandstr);
-//			log("RESULT " + result);
-			// result could be null.  let's just write it back since the client is waiting.
-			writeResultToStream(result, clientSocket.getOutputStream());
-			checkTimings();
 		}
-//		parseServer.close();
+		//parseServer.close();
 	}
-	
+
 
 	/***********  stdin/namedpipe loop  ***********/
 
@@ -247,7 +257,7 @@ public class SocketServer {
 		String inputline;
 		BufferedOutputStream out = new BufferedOutputStream(
 				new FileOutputStream(outpipeFilename, true));
-//		OutputStream out = new FileOutputStream(outpipeFilename, true);
+		//		OutputStream out = new FileOutputStream(outpipeFilename, true);
 		log("Waiting for commands on stdin");
 		while ( (inputline=reader.readLine()) != null) {
 			JsonNode result = parseAndRunCommand(inputline);
