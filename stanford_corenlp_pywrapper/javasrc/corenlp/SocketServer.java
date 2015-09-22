@@ -234,8 +234,6 @@ public class SocketServer {
 				// result could be null.  let's just write it back since the client is waiting.
 				writeResultToStream(result, clientSocket.getOutputStream());
 
-				// get 'ACK', client initialized close
-				// http://stackoverflow.com/a/10726465
 				checkTimings();
 			} catch (IOException e) {
 				e.printStackTrace();
